@@ -1,0 +1,402 @@
+# DevOps NLP API - Complete CI/CD Pipeline
+
+This project implements a fully automated CI/CD pipeline for a Flask-based NLP Language Detection API using AWS Free Tier services, Terraform, and Ansible.
+
+## 🏗️ Architecture Overview
+
+- **Infrastructure as Code**: Terraform for AWS resource provisioning
+- **Configuration Management**: Ansible for server setup
+- **CI/CD**: Jenkins for automated build and deployment
+- **Containerization**: Docker with multi-stage builds
+- **Container Registry**: Amazon ECR
+- **Monitoring**: CloudWatch metrics and alarms
+- **Compute**: EC2 t2.micro (Free Tier)
+
+## 📋 Prerequisites
+
+1. **AWS Account** with Free Tier eligibility
+2. **AWS CLI** configured with credentials
+3. **Terraform** (>= 1.0)
+4. **Ansible** (>= 2.9)
+5. **Git** and **GitHub** account
+6. **GitHub Personal Access Token** for pushing code
+
+## 🚀 Quick Start
+
+### Step 1: Authenticate with GitHub
+
+Before deploying, you need to push the code to GitHub. You have two options:
+
+#### Option A: Using Personal Access Token (Recommended)
+```bash
+# Create a Personal Access Token at: https://github.com/settings/tokens
+# Select scopes: repo (full control)
+
+# Configure Git credential helper
+git config --global credential.helper store
+
+# Push to GitHub (you'll be prompted for username and token)
+cd /home/alen_s_lin/devops/devops
+git push -u origin main
+# Username: SriShivahari
+# Password: <your-personal-access-token>
+```
+
+#### Option B: Using SSH
+```bash
+# Generate SSH key
+ssh-keygen -t ed25519 -C "shivahari.kannan@gmail.com"
+
+# Copy public key to GitHub at: https://github.com/settings/keys
+cat ~/.ssh/id_ed25519.pub
+
+# Change remote to SSH
+git remote set-url origin git@github.com:SriShivahari/Devops_Project.git
+
+# Push to GitHub
+git push -u origin main
+```
+
+### Step 2: Deploy Infrastructure
+
+Once your code is pushed to GitHub, run the automated deployment:
+
+```bash
+cd /home/alen_s_lin/devops/devops
+./deploy.sh
+```
+
+This script will:
+1. ✅ Verify prerequisites
+2. ✅ Initialize Terraform
+3. ✅ Create AWS infrastructure (EC2, ECR, IAM, Security Groups, CloudWatch)
+4. ✅ Generate SSH key pair
+5. ✅ Configure server with Ansible (install Docker, Jenkins, CloudWatch Agent)
+6. ✅ Display access information
+
+**Deployment time**: ~5-7 minutes
+
+### Step 3: Configure Jenkins
+
+After deployment completes, you'll see output like:
+
+```
+Jenkins Web UI: http://<EC2-IP>:8080
+SSH Command: ssh -i jenkins-nlp-key.pem ec2-user@<EC2-IP>
+```
+
+1. **Access Jenkins**:
+   - Open `http://<EC2-IP>:8080` in your browser
+   - Use the initial admin password displayed during deployment
+
+2. **Complete Initial Setup**:
+   - Install suggested plugins
+   - Create admin user
+   - Install additional plugins:
+     - Amazon ECR
+     - Docker Pipeline
+     - GitHub Integration (should already be installed)
+
+3. **Create Pipeline Job**:
+   - Click "New Item"
+   - Enter name: `flask-nlp-api-pipeline`
+   - Select "Pipeline"
+   - Under "Build Triggers", check "GitHub hook trigger for GITScm polling"
+   - Under "Pipeline":
+     - Definition: "Pipeline script from SCM"
+     - SCM: Git
+     - Repository URL: `https://github.com/SriShivahari/Devops_Project.git`
+     - Branch: `*/main`
+     - Script Path: `Jenkinsfile`
+   - Save
+
+### Step 4: Configure GitHub Webhook
+
+1. Go to your GitHub repository: `https://github.com/SriShivahari/Devops_Project`
+2. Navigate to **Settings** → **Webhooks** → **Add webhook**
+3. Configure:
+   - **Payload URL**: `http://<EC2-IP>:8080/github-webhook/`
+   - **Content type**: `application/json`
+   - **Which events**: "Just the push event"
+   - **Active**: ✓
+4. Click "Add webhook"
+
+### Step 5: Test the Pipeline
+
+Trigger your first automated deployment:
+
+```bash
+cd /home/alen_s_lin/devops/devops
+
+# Make a small change to test
+echo "# CI/CD Pipeline Active!" >> README.md
+
+# Commit and push
+git add README.md
+git commit -m "Test: Trigger CI/CD pipeline"
+git push origin main
+```
+
+Watch Jenkins automatically:
+1. Receive webhook from GitHub
+2. Build Docker image
+3. Push to ECR
+4. Deploy to EC2
+
+**Access your API**: `http://<EC2-IP>:5000`
+
+## 📁 Project Structure
+
+```
+devops/
+├── terraform/              # Infrastructure as Code
+│   ├── provider.tf        # AWS provider configuration
+│   ├── variables.tf       # Input variables
+│   ├── ec2.tf            # EC2 instance resources
+│   ├── iam.tf            # IAM roles and policies
+│   ├── ecr.tf            # Container registry
+│   ├── security_groups.tf # Security groups
+│   ├── cloudwatch.tf     # Monitoring and alarms
+│   ├── ssh_key.tf        # SSH key pair generation
+│   └── outputs.tf        # Output values
+├── ansible/               # Configuration Management
+│   ├── playbook.yml      # Main playbook
+│   ├── ansible.cfg       # Ansible configuration
+│   └── inventory.ini     # Generated by deployment
+├── app.py                 # Flask NLP application
+├── requirements.txt       # Python dependencies
+├── Dockerfile            # Multi-stage Docker build
+├── Jenkinsfile           # CI/CD pipeline definition
+├── templates/            # HTML templates
+├── deploy.sh             # Automated deployment script
+├── destroy.sh            # Infrastructure cleanup script
+└── README.md             # This file
+```
+
+## 🔧 Key Components
+
+### Terraform Resources Created
+
+| Resource | Type | Free Tier | Purpose |
+|----------|------|-----------|---------|
+| EC2 Instance | t2.micro | 750 hrs/month | Jenkins + App server |
+| EBS Volume | 30 GB gp2 | 30 GB/month | Storage |
+| Elastic IP | 1 | 1 free when attached | Static public IP |
+| ECR Repository | Private | 500 MB | Docker images |
+| IAM Role | - | Always free | EC2 permissions |
+| Security Group | - | Always free | Firewall rules |
+| CloudWatch | Logs + Metrics | 5GB, 10 metrics | Monitoring |
+
+### Ansible Configuration
+
+The playbook installs and configures:
+- ✅ Docker Engine
+- ✅ Jenkins CI/CD server
+- ✅ AWS CLI v2
+- ✅ CloudWatch Agent
+- ✅ Git and build tools
+- ✅ Deployment scripts
+
+### Docker Multi-Stage Build
+
+The Dockerfile uses multi-stage builds to minimize image size (critical for ECR 500MB limit):
+- **Stage 1 (Builder)**: Compiles dependencies with build tools
+- **Stage 2 (Production)**: Copies only runtime requirements
+
+**Result**: ~60-70% smaller images
+
+## 📊 Monitoring
+
+### CloudWatch Metrics Collected
+
+1. **CPU Utilization** (AWS/EC2)
+2. **Memory Used Percent** (CWAgent)
+3. **Disk Used Percent** (CWAgent)
+4. **Network In/Out** (AWS/EC2)
+
+### Configured Alarms
+
+1. **High CPU**: Triggers when CPU > 70% for 5 minutes
+2. **Status Check Failed**: Monitors instance health
+
+Access CloudWatch console to view metrics and create dashboards.
+
+## 🧪 API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Web interface |
+| `/health` | GET | Health check |
+| `/predict` | POST | Language prediction |
+| `/languages` | GET | Supported languages |
+
+### Example API Usage
+
+```bash
+# Health check
+curl http://<EC2-IP>:5000/health
+
+# Predict language
+curl -X POST http://<EC2-IP>:5000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hello, how are you?"}'
+
+# Get supported languages
+curl http://<EC2-IP>:5000/languages
+```
+
+## 🔒 Security Notes
+
+### Current Configuration (Development)
+- SSH: Open to all IPs (0.0.0.0/0)
+- Jenkins: Open to all IPs
+- API: Open to all IPs
+
+### Production Recommendations
+1. **Restrict SSH access**:
+   ```hcl
+   # In terraform/variables.tf
+   variable "allowed_ssh_cidr" {
+     default = ["YOUR_IP/32"]
+   }
+   ```
+
+2. **Enable HTTPS**:
+   - Use AWS Certificate Manager
+   - Configure Application Load Balancer
+   - Update security groups
+
+3. **Secure Jenkins**:
+   - Enable matrix-based security
+   - Use API tokens instead of passwords
+   - Enable CSRF protection
+
+4. **Secrets Management**:
+   - Use AWS Secrets Manager
+   - Never commit credentials to git
+
+## 💰 Cost Management
+
+### Free Tier Limits
+- **EC2**: 750 hours/month (1 t2.micro running continuously)
+- **EBS**: 30 GB storage
+- **ECR**: 500 MB storage (CRITICAL LIMIT)
+- **Data Transfer**: 100 GB/month out
+- **CloudWatch**: 5 GB logs, 10 custom metrics
+
+### Cost Monitoring
+```bash
+# Check current AWS costs
+aws ce get-cost-and-usage \
+  --time-period Start=2025-10-01,End=2025-10-31 \
+  --granularity MONTHLY \
+  --metrics BlendedCost
+```
+
+### ECR Image Cleanup
+```bash
+# List images
+aws ecr list-images --repository-name flask-nlp-api --region us-east-1
+
+# Delete old images (automatic via lifecycle policy, but manual option available)
+aws ecr batch-delete-image \
+  --repository-name flask-nlp-api \
+  --image-ids imageTag=build-X \
+  --region us-east-1
+```
+
+## 🗑️ Cleanup
+
+To destroy all AWS resources and avoid charges:
+
+```bash
+cd /home/alen_s_lin/devops/devops
+./destroy.sh
+```
+
+This will:
+1. Destroy all Terraform-managed resources
+2. Delete SSH key files
+3. Clean up local configuration
+
+**Note**: ECR images must be deleted manually before destroying:
+```bash
+aws ecr delete-repository --repository-name flask-nlp-api --force --region us-east-1
+```
+
+## 🐛 Troubleshooting
+
+### Jenkins Not Starting
+```bash
+# SSH to server
+ssh -i jenkins-nlp-key.pem ec2-user@<EC2-IP>
+
+# Check Jenkins status
+sudo systemctl status jenkins
+
+# View logs
+sudo journalctl -u jenkins -f
+```
+
+### Docker Permission Denied
+```bash
+# Jenkins user needs to be in docker group (Ansible handles this)
+sudo usermod -aG docker jenkins
+sudo systemctl restart jenkins
+```
+
+### ECR Push Failed
+```bash
+# Verify IAM role attached
+aws sts get-caller-identity
+
+# Manually login to ECR
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin \
+  462645401353.dkr.ecr.us-east-1.amazonaws.com
+```
+
+### Application Not Starting
+```bash
+# Check container logs
+docker logs flask-nlp-app
+
+# Check if container is running
+docker ps -a
+
+# Restart container
+docker restart flask-nlp-app
+```
+
+## 📚 Additional Resources
+
+- [AWS Free Tier](https://aws.amazon.com/free/)
+- [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [Ansible Documentation](https://docs.ansible.com/)
+- [Jenkins Documentation](https://www.jenkins.io/doc/)
+- [Docker Multi-Stage Builds](https://docs.docker.com/build/building/multi-stage/)
+
+## 🎯 Next Steps
+
+1. **Add Tests**: Integrate unit tests in Jenkins pipeline
+2. **Blue-Green Deployment**: Implement zero-downtime deployments
+3. **Database**: Add RDS (also has free tier)
+4. **Load Balancer**: Use ALB for high availability
+5. **Domain**: Configure Route 53 with custom domain
+6. **SSL/TLS**: Enable HTTPS with ACM certificates
+7. **Monitoring Dashboard**: Create CloudWatch dashboard
+8. **Alerts**: Configure SNS for email/SMS notifications
+
+## 📝 License
+
+This project is for educational purposes as part of a DevOps learning curriculum.
+
+## 👤 Author
+
+**Sri Shivahari**
+- Email: shivahari.kannan@gmail.com
+- GitHub: [@SriShivahari](https://github.com/SriShivahari)
+
+---
+
+**Note**: This is a learning project designed to operate within AWS Free Tier limits. For production use, implement additional security measures and scalability patterns.
