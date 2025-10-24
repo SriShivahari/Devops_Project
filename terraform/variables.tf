@@ -17,9 +17,9 @@ variable "project_name" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type (Free tier: t3.micro)"
+  description = "EC2 instance type (Free tier: t3.small for Docker builds)"
   type        = string
-  default     = "t3.micro"
+  default     = "t3.small"
 }
 
 variable "key_name" {
