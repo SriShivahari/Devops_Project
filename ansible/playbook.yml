@@ -1,0 +1,239 @@
+---
+- name: Configure Jenkins CI/CD Server
+  hosts: jenkins_server
+  become: yes
+  gather_facts: yes
+
+  vars:
+    aws_region: "us-east-1"
+    aws_account_id: "462645401353"
+    ecr_repository: "flask-nlp-api"
+    jenkins_admin_user: "admin"
+    jenkins_admin_password: "Admin@123"  # Change this in production
+
+  tasks:
+    - name: Wait for instance to be ready
+      wait_for_connection:
+        timeout: 300
+
+    - name: Update all system packages
+      dnf:
+        name: "*"
+        state: latest
+      retries: 3
+      delay: 10
+
+    - name: Install required packages
+      dnf:
+        name:
+          - git
+          - docker
+          - java-17-amazon-corretto
+          - python3
+          - python3-pip
+          - wget
+          - unzip
+        state: present
+      retries: 3
+      delay: 10
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add ec2-user to docker group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
+
+    - name: Install AWS CLI v2 (if not present)
+      shell: |
+        if ! command -v aws &> /dev/null; then
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          /tmp/aws/install
+          rm -rf /tmp/aws /tmp/awscliv2.zip
+        fi
+      args:
+        creates: /usr/local/bin/aws
+
+    - name: Add Jenkins repository
+      shell: |
+        wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+        rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+      args:
+        creates: /etc/yum.repos.d/jenkins.repo
+
+    - name: Install Jenkins
+      dnf:
+        name: jenkins
+        state: present
+      retries: 3
+      delay: 10
+
+    - name: Start and enable Jenkins service
+      systemd:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Add jenkins user to docker group
+      user:
+        name: jenkins
+        groups: docker
+        append: yes
+
+    - name: Wait for Jenkins to start
+      wait_for:
+        port: 8080
+        delay: 10
+        timeout: 300
+
+    - name: Get Jenkins initial admin password
+      slurp:
+        src: /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_initial_password
+      retries: 5
+      delay: 10
+
+    - name: Display Jenkins initial password
+      debug:
+        msg: "Jenkins Initial Admin Password: {{ jenkins_initial_password['content'] | b64decode }}"
+
+    - name: Install CloudWatch Agent
+      yum:
+        name: amazon-cloudwatch-agent
+        state: present
+
+    - name: Create CloudWatch Agent config
+      copy:
+        content: |
+          {
+            "agent": {
+              "metrics_collection_interval": 60,
+              "run_as_user": "root"
+            },
+            "metrics": {
+              "append_dimensions": {
+                "InstanceId": "${aws:InstanceId}"
+              },
+              "metrics_collected": {
+                "disk": {
+                  "measurement": [
+                    {
+                      "name": "used_percent",
+                      "rename": "DiskUsedPercent",
+                      "unit": "Percent"
+                    }
+                  ],
+                  "metrics_collection_interval": 60,
+                  "resources": [
+                    "/"
+                  ]
+                },
+                "mem": {
+                  "measurement": [
+                    {
+                      "name": "mem_used_percent",
+                      "rename": "MemoryUsedPercent",
+                      "unit": "Percent"
+                    }
+                  ],
+                  "metrics_collection_interval": 60
+                }
+              }
+            }
+          }
+        dest: /opt/aws/amazon-cloudwatch-agent/etc/config.json
+        mode: '0644'
+
+    - name: Start CloudWatch Agent
+      shell: |
+        /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+          -a fetch-config \
+          -m ec2 \
+          -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json \
+          -s
+
+    - name: Create deployment script directory
+      file:
+        path: /opt/deployment
+        state: directory
+        mode: '0755'
+
+    - name: Create deployment script
+      copy:
+        content: |
+          #!/bin/bash
+          set -e
+
+          AWS_REGION="{{ aws_region }}"
+          AWS_ACCOUNT_ID="{{ aws_account_id }}"
+          ECR_REPOSITORY="{{ ecr_repository }}"
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          APP_CONTAINER_NAME="flask-nlp-app"
+
+          echo "Logging into ECR..."
+          aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+
+          echo "Pulling latest image from ECR..."
+          docker pull ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+
+          echo "Stopping and removing old container if it exists..."
+          if [ $(docker ps -aq -f name=${APP_CONTAINER_NAME}) ]; then
+              docker stop ${APP_CONTAINER_NAME} || true
+              docker rm ${APP_CONTAINER_NAME} || true
+          fi
+
+          echo "Starting new container..."
+          docker run -d --name ${APP_CONTAINER_NAME} -p 5000:5000 ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+
+          echo "Deployment completed successfully!"
+        dest: /opt/deployment/deploy.sh
+        mode: '0755'
+
+    - name: Restart docker to apply group changes
+      systemd:
+        name: docker
+        state: restarted
+
+    - name: Save important information to file
+      copy:
+        content: |
+          ====================================
+          Jenkins Server Setup Complete
+          ====================================
+          
+          Jenkins URL: http://{{ ansible_host }}:8080
+          Flask API URL: http://{{ ansible_host }}:5000
+          
+          Jenkins Initial Admin Password:
+          {{ jenkins_initial_password['content'] | b64decode }}
+          
+          SSH Command:
+          ssh -i jenkins-nlp-key.pem ec2-user@{{ ansible_host }}
+          
+          ECR Repository:
+          {{ aws_account_id }}.dkr.ecr.{{ aws_region }}.amazonaws.com/{{ ecr_repository }}
+          
+          Next Steps:
+          1. Open Jenkins at http://{{ ansible_host }}:8080
+          2. Use the initial admin password above
+          3. Install suggested plugins
+          4. Create admin user
+          5. Install additional plugins: Amazon ECR, Docker Pipeline
+          6. Create pipeline job connected to GitHub
+          ====================================
+        dest: /home/ec2-user/setup-info.txt
+        owner: ec2-user
+        group: ec2-user
+        mode: '0644'
+
+  handlers:
+    - name: restart jenkins
+      systemd:
+        name: jenkins
+        state: restarted
