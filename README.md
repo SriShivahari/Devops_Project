@@ -185,3 +185,4 @@ docker run -it --entrypoint /bin/bash language-detection
 
 This project is licensed under the MIT License.
 
+## CI/CD Pipeline Active!
